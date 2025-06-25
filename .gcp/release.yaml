@@ -1,0 +1,98 @@
+steps:
+  # Step 1: Install root dependencies (includes workspaces)
+  - name: 'us-west1-docker.pkg.dev/gemini-code-dev/gemini-code-containers/gemini-code-builder'
+    entrypoint: 'npm'
+    args: ['install']
+
+  # Step 2: Update version in root package.json
+  - name: 'us-west1-docker.pkg.dev/gemini-code-dev/gemini-code-containers/gemini-code-builder'
+    entrypoint: 'bash'
+    args:
+      - -c # Use bash -c to allow for command substitution and string manipulation
+      - |
+        current_version=$(npm pkg get version | sed 's/"//g')
+        new_version="$${current_version}-rc.$_REVISION"
+        npm pkg set "version=$${new_version}"
+        echo "Set root package.json version to: $${new_version}"
+
+  # Step 3: Run prerelease:dev to update workspace versions and dependencies
+  - name: 'us-west1-docker.pkg.dev/gemini-code-dev/gemini-code-containers/gemini-code-builder'
+    entrypoint: 'npm'
+    args: ['run', 'prerelease:dev'] # This will run prerelease:version and prerelease:deps
+
+  # Step 4: Authenticate for Docker and NPM
+  - name: 'us-west1-docker.pkg.dev/gemini-code-dev/gemini-code-containers/gemini-code-builder'
+    entrypoint: 'npm'
+    args: ['run', 'auth']
+
+  # Step 5: Build workspace packages
+  - name: 'us-west1-docker.pkg.dev/gemini-code-dev/gemini-code-containers/gemini-code-builder'
+    entrypoint: 'npm'
+    args: ['run', 'build:packages']
+
+  # Step 6: Prepare CLI package.json for publishing
+  - name: 'us-west1-docker.pkg.dev/gemini-code-dev/gemini-code-containers/gemini-code-builder'
+    entrypoint: 'npm'
+    args: ['run', 'prepare:cli-packagejson']
+
+  # Step 7: Build sandbox container image
+  - name: 'us-west1-docker.pkg.dev/gemini-code-dev/gemini-code-containers/gemini-code-builder'
+    entrypoint: 'npm'
+    args: ['run', 'build:docker']
+    env:
+      - 'GEMINI_SANDBOX=$_CONTAINER_TOOL'
+      - 'SANDBOX_IMAGE_REGISTRY=$_SANDBOX_IMAGE_REGISTRY'
+      - 'SANDBOX_IMAGE_NAME=$_SANDBOX_IMAGE_NAME'
+
+  # Step 8: Publish sandbox container image
+  - name: 'us-west1-docker.pkg.dev/gemini-code-dev/gemini-code-containers/gemini-code-builder'
+    entrypoint: 'npm'
+    args: ['run', 'publish:sandbox']
+    env:
+      - 'GEMINI_SANDBOX=$_CONTAINER_TOOL'
+      - 'SANDBOX_IMAGE_REGISTRY=$_SANDBOX_IMAGE_REGISTRY'
+      - 'SANDBOX_IMAGE_NAME=$_SANDBOX_IMAGE_NAME'
+
+  # Step 9: Publish @google/gemini-cli-core to NPM
+  - name: 'us-west1-docker.pkg.dev/gemini-code-dev/gemini-code-containers/gemini-code-builder'
+    entrypoint: 'bash'
+    args:
+      - -c
+      - |
+        npm publish --workspace=@google/gemini-cli-core --tag=$_NPM_PUBLISH_TAG
+    env:
+      - 'NODE_AUTH_TOKEN=$CORE_AUTH_TOKEN'
+    secretEnv:
+      - 'CORE_AUTH_TOKEN'
+
+  # Step 10: Publish @google/gemini-cli to NPM
+  - name: 'us-west1-docker.pkg.dev/gemini-code-dev/gemini-code-containers/gemini-code-builder'
+    entrypoint: 'bash'
+    args:
+      - -c
+      - |
+        npm publish --workspace=@google/gemini-cli --tag=$_NPM_PUBLISH_TAG
+    env:
+      - 'NODE_AUTH_TOKEN=$CLI_AUTH_TOKEN'
+    secretEnv:
+      - 'CLI_AUTH_TOKEN'
+
+options:
+  defaultLogsBucketBehavior: REGIONAL_USER_OWNED_BUCKET
+  dynamicSubstitutions: true
+
+availableSecrets:
+  secretManager:
+    - versionName: ${_WOMBAT_CLI_PATH}
+      env: 'CLI_AUTH_TOKEN'
+    - versionName: ${_WOMBAT_CORE_PATH}
+      env: 'CORE_AUTH_TOKEN'
+
+substitutions:
+  _REVISION: '0'
+  _SANDBOX_IMAGE_REGISTRY: 'us-west1-docker.pkg.dev/gemini-code-dev/gemini-cli'
+  _SANDBOX_IMAGE_NAME: 'sandbox'
+  _NPM_PUBLISH_TAG: ''
+  _CONTAINER_TOOL: 'docker'
+  _WOMBAT_CLI_PATH: ''
+  _WOMBAT_CORE_PATH: ''
